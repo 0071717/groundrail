@@ -87,14 +87,17 @@ Implementation has begun, following the **revised roadmap** in
 [`docs/09_INDEPENDENT_ARCHITECTURE_REVIEW.md`](docs/09_INDEPENDENT_ARCHITECTURE_REVIEW.md).
 The codebase is organised as three components rather than ten layers:
 
-- **`indexer`** — deterministic source snapshot + Python AST unit index (no AI).
+- **`indexer`** — deterministic source snapshot + Python AST unit index, plus a
+  best-effort TypeScript/React extractor (components, hooks, API-client functions)
+  that marks regex-derived boundaries `inferred` and emits gaps for dynamic patterns.
 - **`analyzer`** — AI unit analysis with provenance, uncertainty, secret-scanning,
   and stale binding; defaults to `state: inferred` and rejects any `verified` claim.
 - **`router`** — retrieval, token-budgeted context packs, Kiro runner, and answer audit.
 
 `core` holds the shared trust contract (vocabulary, artifact envelope, evidence,
 storage, strict validation). Phases 1–4 of the revised roadmap — through the first
-useful product (`ask` with cited context packs) — are implemented and tested.
+useful product (`ask` with cited context packs) — plus Phase 6 (TypeScript/React
+extraction) are implemented and tested.
 
 ### Quickstart
 
@@ -112,11 +115,13 @@ export GROUNDRAIL_KIRO_CMD='kiro-cli --prompt-file {context_pack}'
 groundrail ask "how does order total work?"   # context pack -> Kiro -> citation audit
 ```
 
-Run the test suite with `pytest` (50 tests covering the trust contract,
-extraction, strict validation, prompt-injection handling, and the audit loop).
+Run the test suite with `pytest` (60 tests covering the trust contract, Python
+and TypeScript/React extraction, strict validation, prompt-injection handling,
+and the audit loop).
 
 ### Not yet implemented (deferred per the revised roadmap)
 
-TypeScript/React extraction (Phase 6), flow/impact composition (Phase 7),
-the full TUI, and the conductor/child-agent orchestration. Promotion is folded
-into review rather than kept as a separate layer.
+Flow/impact composition (Phase 7), the full TUI, and the conductor/child-agent
+orchestration. Promotion is folded into review rather than kept as a separate
+layer. TypeScript extraction is regex/brace-based (not type-aware); deeper
+analysis (tsconfig path aliases, cross-file symbol resolution) is future work.

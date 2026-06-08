@@ -14,7 +14,7 @@ from ..core import envelope
 from ..core.errors import NotFoundError
 from ..core.store import ArtifactStore
 from ..core.workspace import Workspace
-from . import python_units
+from . import python_units, typescript_units
 from .snapshot import FILE_INDEX_PATH, load_file_index
 
 UNIT_INDEX_PATH = "index/unit-index.json"
@@ -38,24 +38,20 @@ class UnitIndexBuilder:
         units: list[dict[str, Any]] = []
         gaps: list[dict[str, Any]] = []
         for record in load_file_index(self.store):
-            if record.get("language") != "python" or record.get("classification") == "generated":
-                if record.get("language") in ("typescript", "javascript"):
-                    gaps.append(
-                        {
-                            "kind": "typescript_unsupported",
-                            "repo": record.get("repo", ""),
-                            "location": record.get("path", ""),
-                            "detail": "TypeScript/React extraction not yet implemented (revised roadmap Phase 6)",
-                            "severity": "info",
-                            "state": "unsupported",
-                        }
-                    )
+            language = record.get("language")
+            if record.get("classification") == "generated":
+                continue
+            if language == "python":
+                extractor = python_units.extract_file
+            elif language in ("typescript", "javascript"):
+                extractor = typescript_units.extract_file
+            else:
                 continue
             repo_root = self.workspace.repo_root(record["repo"])
             text = _read(repo_root / record["path"])
             if text is None:
                 continue
-            extracted = python_units.extract_file(
+            extracted = extractor(
                 repo=record["repo"],
                 file_path=record["path"],
                 source_text=text,
