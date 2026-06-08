@@ -181,7 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("smart", commands.cmd_smart, "print the latest session (pack + answer + audit)")
 
     p = add("tui", commands.cmd_tui, "interactive cockpit (or --print for a text snapshot)")
-    p.add_argument("--print", choices=["dashboard", "units", "sessions", "gaps", "unit", "session"],
+    p.add_argument("--print", choices=["dashboard", "units", "review", "knowledge", "sessions", "gaps", "map", "eval", "unit", "session"],
                    help="render one screen as text and exit (no TTY needed)")
     p.add_argument("--unit", help="unit id for --print unit")
     p.add_argument("--session", help="session id for --print session")
