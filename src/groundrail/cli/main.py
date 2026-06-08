@@ -150,6 +150,43 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("target")
     p.add_argument("--json", action="store_true")
 
+    # conductor / orchestration
+    p = add("orchestrate", _orchestrate_dispatch, "run a conductor workflow")
+    osub = p.add_subparsers(dest="workflow", required=True)
+    for wf, help_text in [
+        ("debug", "investigate a bug or issue"),
+        ("review", "review code changes"),
+        ("plan", "plan an implementation"),
+    ]:
+        op = osub.add_parser(wf, help=help_text)
+        op.set_defaults(func=commands.cmd_orchestrate)
+        op.add_argument("request", nargs="+", help="request or question")
+        op.add_argument("--no-agent", action="store_true", dest="no_agent",
+                        help="skip child agent; generate plan from context pack only")
+        op.add_argument("--json", action="store_true")
+
+    p = add("orchestrations", _orchestrations_dispatch, "list or inspect orchestrations")
+    orsub = p.add_subparsers(dest="orchestrations_action", required=True)
+    orl = orsub.add_parser("list", help="list past orchestrations")
+    orl.set_defaults(func=commands.cmd_orchestrations_list)
+    orl.add_argument("--json", action="store_true")
+    orsh = orsub.add_parser("show", help="show an orchestration (default: latest)")
+    orsh.set_defaults(func=commands.cmd_orchestrations_show)
+    orsh.add_argument("orch_id", nargs="?", default=None)
+    orsh.add_argument("--json", action="store_true")
+
+    p = add("synthesize", commands.cmd_synthesize, "synthesize findings for an orchestration")
+    p.add_argument("orch_id", nargs="?", default=None,
+                   help="orchestration id (default: latest)")
+    p.add_argument("--json", action="store_true")
+
+    p = add("conflicts", commands.cmd_conflicts, "show synthesis conflicts")
+    p.add_argument("orch_id", nargs="?", default=None)
+    p.add_argument("--json", action="store_true")
+
+    p = add("agent-validate", commands.cmd_agent_validate, "validate an agent result file")
+    p.add_argument("result_file", help="path to a file containing a groundrail_agent_result block")
+
     # evidence kernel
     p = add("validate", commands.cmd_validate, "validate artifact envelopes and records")
     p.add_argument("--strict", action="store_true")
@@ -180,6 +217,14 @@ def _audit_dispatch(args):  # pragma: no cover
 
 
 def _flow_dispatch(args):  # pragma: no cover
+    return args.func(args)
+
+
+def _orchestrate_dispatch(args):  # pragma: no cover
+    return args.func(args)
+
+
+def _orchestrations_dispatch(args):  # pragma: no cover
     return args.func(args)
 
 

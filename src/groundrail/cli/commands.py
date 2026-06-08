@@ -28,6 +28,10 @@ from ..indexer.unit_index import UNIT_INDEX_PATH, UnitIndexBuilder, UnitStore
 from ..router.audit import AnswerAuditor
 from ..router.context_pack import ContextPackBuilder
 from ..router.kiro import KiroRunner
+from ..conductor.agent import parse_agent_result, validate_agent_result
+from ..conductor.store import OrchestrationStore
+from ..conductor.synthesize import synthesize
+from ..conductor.workflows import OrchestratorWorkflow
 from ..router.retrieval import RetrievalIndex, RetrievalIndexBuilder
 from ..router.session import SessionStore
 
@@ -601,3 +605,159 @@ def _write_report(ws: Workspace, path: str, kind: str, report: ValidationReport)
         data=report.as_dict(),
     )
     ws.store.write_json(path, artifact)
+
+
+# --- conductor ---------------------------------------------------------------
+
+def cmd_orchestrate(args: Any) -> int:
+    ws = _ws()
+    workflow = args.workflow
+    request = " ".join(args.request)
+    no_agent = getattr(args, "no_agent", False)
+    orchestrator = OrchestratorWorkflow(ws)
+    outcome = orchestrator.run(workflow, request, no_agent=no_agent)
+    if args.json:
+        _emit(outcome)
+    else:
+        oid = outcome["orchestration_id"]
+        mode = outcome["mode"]
+        finding = outcome.get("finding") or {}
+        print(f"orchestration: {oid}")
+        print(f"  workflow:  {workflow}")
+        print(f"  mode:      {mode}")
+        print(f"  verdict:   {finding.get('verdict', 'unknown')}")
+        print(f"  findings:  {len(finding.get('findings', []))}")
+        preflight = outcome.get("preflight", {})
+        for w in preflight.get("warnings", []):
+            print(f"  warn: {w}")
+        print(f"\nSummary: {finding.get('summary', '')}")
+    return 0
+
+
+def cmd_orchestrations_list(args: Any) -> int:
+    ws = _ws()
+    plans = OrchestrationStore(ws).list_all()
+    if args.json:
+        _emit(plans)
+    else:
+        if not plans:
+            print("no orchestrations yet; run `groundrail orchestrate debug|review|plan <request>`")
+        for p in plans:
+            print(
+                f"  {p['orchestration_id']}  {p['workflow']:8s}  "
+                f"{p['status']:10s}  {p['created_at']}  {p['request'][:60]}"
+            )
+        print(f"\n{len(plans)} orchestration(s)")
+    return 0
+
+
+def cmd_orchestrations_show(args: Any) -> int:
+    ws = _ws()
+    orch_store = OrchestrationStore(ws)
+    orch_id = getattr(args, "orch_id", None) or orch_store.latest_id()
+    if not orch_id:
+        raise GroundrailError("no orchestrations; run an orchestrate command first")
+    plan = orch_store.get_plan(orch_id)
+    events = orch_store.get_events(orch_id)
+    findings = orch_store.list_findings(orch_id)
+    quarantine = orch_store.list_quarantine(orch_id)
+    if args.json:
+        _emit({"plan": plan, "events": events, "findings": findings, "quarantine": quarantine})
+    else:
+        print(f"orchestration: {plan['orchestration_id']}")
+        print(f"  workflow: {plan['workflow']}")
+        print(f"  request:  {plan['request']}")
+        print(f"  status:   {plan['status']}")
+        print(f"  created:  {plan['created_at']}")
+        print(f"\nevents ({len(events)}):")
+        for ev in events:
+            print(f"  [{ev['ts']}] {ev['event']}")
+        print(f"\nfindings ({len(findings)}):")
+        for f in findings:
+            n = len(f.get("findings", []))
+            print(f"  task {f.get('task_id', '?')}: {f.get('verdict', '?')} — {n} item(s)")
+        if quarantine:
+            print(f"\nquarantine ({len(quarantine)}):")
+            for q in quarantine:
+                print(f"  task {q['task_id']}: {q['reason']}")
+    return 0
+
+
+def cmd_synthesize(args: Any) -> int:
+    ws = _ws()
+    orch_store = OrchestrationStore(ws)
+    orch_id = getattr(args, "orch_id", None) or orch_store.latest_id()
+    if not orch_id:
+        raise GroundrailError("no orchestrations to synthesize")
+    plan = orch_store.get_plan(orch_id)
+    findings = orch_store.list_findings(orch_id)
+    result = synthesize(
+        findings,
+        orchestration_id=orch_id,
+        workflow=plan["workflow"],
+        request=plan["request"],
+    )
+    orch_store.write_synthesis(orch_id, result)
+    if args.json:
+        _emit(result)
+    else:
+        print(f"synthesis: {orch_id}")
+        print(f"  workflow:   {result['workflow']}")
+        print(f"  confidence: {result['overall_confidence']}")
+        print(f"  findings:   {result['finding_count']}")
+        print(f"  conflicts:  {result['conflict_count']}")
+        for f in result["findings"]:
+            sev = f.get("severity", "?")
+            print(f"  [{sev:8s}] {f.get('title', '')[:70]}")
+        if result["conflicts"]:
+            print(f"\nconflicts ({result['conflict_count']}):")
+            for c in result["conflicts"]:
+                print(f"  {c['description']}: finding ids {c['finding_ids']}")
+    return 0
+
+
+def cmd_conflicts(args: Any) -> int:
+    ws = _ws()
+    orch_store = OrchestrationStore(ws)
+    orch_id = getattr(args, "orch_id", None) or orch_store.latest_id()
+    if not orch_id:
+        raise GroundrailError("no orchestrations found")
+    try:
+        synthesis = orch_store.get_synthesis(orch_id)
+    except GroundrailError:
+        raise GroundrailError(
+            f"no synthesis for {orch_id}; run `groundrail synthesize` first"
+        )
+    conflicts = synthesis.get("conflicts", [])
+    if args.json:
+        _emit(conflicts)
+    else:
+        if not conflicts:
+            print(f"no conflicts in orchestration {orch_id}")
+        else:
+            print(f"{len(conflicts)} conflict(s) in {orch_id}:")
+            for c in conflicts:
+                print(f"  {c['description']}")
+                print(f"    finding ids: {c['finding_ids']}")
+    return 0
+
+
+def cmd_agent_validate(args: Any) -> int:
+    path = Path(args.result_file)
+    if not path.exists():
+        raise GroundrailError(f"file not found: {path}")
+    raw = path.read_text(encoding="utf-8")
+    result, errors = parse_agent_result(raw)
+    if errors:
+        print(f"INVALID: {len(errors)} error(s)")
+        for e in errors:
+            print(f"  - {e}")
+        return 1
+    errors2 = validate_agent_result(result)
+    if errors2:
+        print(f"INVALID: {len(errors2)} error(s)")
+        for e in errors2:
+            print(f"  - {e}")
+        return 1
+    print(f"VALID: task_id={result.get('task_id')} verdict={result.get('verdict')}")
+    return 0
