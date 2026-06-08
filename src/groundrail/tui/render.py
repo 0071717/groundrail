@@ -20,12 +20,7 @@ def truncate(text: str, width: int) -> str:
 
 
 def frame(title: str, body: list[str], footer: str, width: int, height: int | None) -> list[str]:
-    """Compose a titled, footed frame.
-
-    With an integer ``height`` the body is clamped/padded to fill the screen
-    (interactive curses). With ``height is None`` the frame fits the body exactly
-    (non-interactive ``--print``).
-    """
+    """Compose a titled, footed frame."""
     bar = truncate(f" Groundrail │ {title}", width).ljust(width)
     sep = "─" * width
     if height is not None:
@@ -48,10 +43,13 @@ def _marker(selected: bool) -> str:
 def render_dashboard(vm: dict[str, Any], width: int) -> list[str]:
     lines = [
         "",
-        f"  files indexed : {vm['files']}",
-        f"  units         : {vm['units']}   analysed: {vm['analysed']}   "
-        f"unanalysed: {vm['unanalysed']}   stale: {vm['stale']}",
-        f"  capability gaps: {vm['gaps']}     sessions: {len(vm['sessions'])}",
+        "  trust boundary:",
+        f"    files={vm['files']}  units={vm['units']}  analysed={vm['analysed']}  "
+        f"unanalysed={vm['unanalysed']}  stale={vm['stale']}",
+        f"    review_items={vm['review_items']}  confirmed={vm['confirmed_items']}  "
+        f"knowledge_facts={vm['knowledge_facts']}",
+        f"    layers_ready={vm['layers_ready']}/{vm['layers_total']}  "
+        f"gaps={vm['gaps']}  eval={vm['eval_status']}",
         "",
         "  unit kinds:",
     ]
@@ -74,11 +72,11 @@ def render_units(rows: list[dict[str, Any]], selection: int, width: int) -> list
     for i, r in enumerate(rows):
         a = r.get("analysis_state") or "-"
         review = r.get("review_status") or ""
-        flag = "*" if review == "dev_confirmed" else ""
+        flag = "✓" if review == "dev_confirmed" else "!" if review == "dev_rejected" else " "
         span = r["span"]
         lines.append(
-            f"{_marker(i == selection)}{r['symbol']:22s} {r['kind']:22s} "
-            f"[{a:8s}]{flag:1s} {r['file_path']}:{span['start_line']}"
+            f"{_marker(i == selection)}{flag} {r['symbol']:22s} {r['kind']:22s} "
+            f"[{a:8s}] {r['file_path']}:{span['start_line']}"
         )
     return lines
 
@@ -96,6 +94,8 @@ def render_unit_detail(detail: dict[str, Any], width: int) -> list[str]:
     if a:
         lines.append(f"  analysis [{a['state']}/{a['confidence']}] review={a['review_status']}")
         lines.append(f"    {a['summary']}")
+        for claim in a.get("intent", [])[:3]:
+            lines.append(f"    claim {claim['claim_id']} [{claim.get('review_status','')}] {claim['text']}")
         for unc in a.get("uncertainties", [])[:3]:
             lines.append(f"    ? {unc['text']}")
         for note in a.get("ai_notes", [])[:3]:
@@ -115,18 +115,48 @@ def render_unit_detail(detail: dict[str, Any], width: int) -> list[str]:
     return lines
 
 
+def render_review(rows: list[dict[str, Any]], selection: int, width: int) -> list[str]:
+    lines = [f"  {len(rows)} review item(s)   ✓ confirmed  ! rejected", ""]
+    for i, r in enumerate(rows):
+        status = r.get("review_status", "")
+        flag = "✓" if status == "dev_confirmed" else "!" if status == "dev_rejected" else " "
+        stale = " stale" if r.get("stale") else ""
+        lines.append(f"{_marker(i == selection)}{flag} {r['scope']:16s} [{r['state']}/{r['confidence']}/{status}]{stale}")
+        lines.append(f"    {truncate(r['item_id'], max(20, width - 8))}")
+        lines.append(f"    {truncate(r.get('text',''), max(20, width - 8))}")
+    return lines
+
+
+def render_knowledge(rows: list[dict[str, Any]], selection: int, width: int) -> list[str]:
+    lines = [f"  {len(rows)} promoted fact(s)", ""]
+    for i, f in enumerate(rows):
+        lines.append(
+            f"{_marker(i == selection)}{f['fact_id']} [{f['state']}/{f['confidence']}/{f['review_status']}]"
+        )
+        lines.append(f"    {truncate(f.get('text',''), max(20, width - 8))}")
+        lines.append(f"    from {truncate(f.get('source_item_id',''), max(20, width - 10))}")
+    return lines
+
+
 def render_sessions(rows: list[dict[str, Any]], selection: int, width: int) -> list[str]:
     lines = [f"  {len(rows)} session(s)   (enter: detail)", ""]
     for i, r in enumerate(rows):
         lines.append(
             f"{_marker(i == selection)}{r['session_id']}  [{r.get('mode','')}]  "
-            f"audit={r.get('audit','-') or '-'}  {truncate(r.get('request',''), 40)}"
+            f"audit={r.get('audit','-') or '-'} facts={r.get('facts',0)} analyses={r.get('analyses',0)}  "
+            f"{truncate(r.get('request',''), 40)}"
         )
     return lines
 
 
 def render_session_detail(detail: dict[str, Any], width: int) -> list[str]:
     lines = [f"  session {detail['session_id']}", ""]
+    if "audit" in detail:
+        audit = detail["audit"]
+        lines.append(f"  audit: {audit['status']} ({audit.get('claims_checked', 0)} claims)")
+        for f in audit.get("findings", []):
+            lines.append(f"    [{f['severity']}] {f['message']}")
+        lines.append("")
     if "pack_md" in detail:
         lines.append("  -- context pack --")
         lines.extend("  " + l for l in detail["pack_md"].splitlines())
@@ -135,11 +165,6 @@ def render_session_detail(detail: dict[str, Any], width: int) -> list[str]:
         lines.append("  -- kiro answer --")
         lines.extend("  " + l for l in detail["answer"].splitlines())
         lines.append("")
-    if "audit" in detail:
-        audit = detail["audit"]
-        lines.append(f"  -- audit: {audit['status']} ({audit.get('claims_checked', 0)} claims) --")
-        for f in audit.get("findings", []):
-            lines.append(f"    [{f['severity']}] {f['message']}")
     return lines
 
 
@@ -153,8 +178,34 @@ def render_gaps(rows: list[dict[str, Any]], selection: int, width: int) -> list[
     return lines
 
 
+def render_layer_map(vm: dict[str, Any], selection: int, width: int) -> list[str]:
+    layers = vm.get("layers", [])
+    lines = [f"  {len(layers)} implemented layer(s)", ""]
+    for i, layer in enumerate(layers):
+        ready = "ready" if layer.get("workspace_ready") else "not-yet-generated"
+        lines.append(f"{_marker(i == selection)}{layer['layer']:24s} {ready}")
+        lines.append(f"    {truncate(layer.get('goal',''), max(20, width - 8))}")
+    lines.append("")
+    lines.append("  flow:")
+    for edge in vm.get("flow_edges", [])[:12]:
+        lines.append(f"    {edge['from']} -> {edge['to']}")
+    return lines
+
+
+def render_eval(vm: dict[str, Any], selection: int, width: int) -> list[str]:
+    checks = vm.get("checks", [])
+    lines = [f"  eval status: {vm.get('status', 'not_run')}", ""]
+    if not checks:
+        lines.append("  no eval report yet; run `groundrail eval run`")
+        return lines
+    for i, check in enumerate(checks):
+        lines.append(f"{_marker(i == selection)}[{check.get('status')}] {check.get('name')}")
+        lines.append(f"    {truncate(check.get('detail',''), max(20, width - 8))}")
+    return lines
+
+
 def footer_for(screen: str) -> str:
-    common = "tab/1-4: screens   q: quit   r: refresh"
+    common = "tab/1-8: screens   q: quit   r: refresh"
     if screen in ("unit", "session"):
         return "esc: back   " + common
     return common
