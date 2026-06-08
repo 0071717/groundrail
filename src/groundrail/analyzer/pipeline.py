@@ -85,10 +85,17 @@ class AnalysisPipeline:
         selected: list[dict[str, Any]] = []
         for unit in targets:
             existing = self.analyses.try_get(unit["unit_id"])
-            if only_missing and existing is not None:
-                continue
-            if only_stale and existing is not None and not self.analyses.is_stale(existing, unit):
-                continue
+            is_missing = existing is None
+            is_stale = bool(existing is not None and self.analyses.is_stale(existing, unit))
+
+            if only_missing or only_stale:
+                # Union semantics: --missing selects missing analyses, --stale selects
+                # existing stale analyses, and --changed means both. Do not treat a
+                # missing analysis as stale; that made --stale silently process new
+                # units and contradicted the CLI help text.
+                if not ((only_missing and is_missing) or (only_stale and is_stale)):
+                    continue
+
             selected.append(unit)
         if limit is not None:
             selected = selected[:limit]
