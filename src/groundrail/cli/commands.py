@@ -19,6 +19,9 @@ from ..core.errors import GroundrailError, NotFoundError
 from ..core.gaps import CapabilityGapRegistry
 from ..core.validation import ValidationReport, validate_artifact, validate_unit_record
 from ..core.workspace import Workspace
+from ..flow.flows import FlowComposer
+from ..flow.graph import GraphBuilder
+from ..flow.impact import ImpactEngine
 from ..indexer.changes import ChangeDetector
 from ..indexer.snapshot import FILE_INDEX_PATH, SourceSnapshotter, load_file_index
 from ..indexer.unit_index import UNIT_INDEX_PATH, UnitIndexBuilder, UnitStore
@@ -334,6 +337,100 @@ def cmd_smart(args: Any) -> int:
         print(f"=== audit: {audit['status']} ({audit['claims_checked']} claims) ===")
         for f in audit["findings"]:
             print(f"  [{f['severity']}] {f['message']}")
+    return 0
+
+
+# --- flow / impact -----------------------------------------------------------
+def cmd_graph_build(args: Any) -> int:
+    ws = _ws()
+    graph = GraphBuilder(ws).build()
+    edge_count = sum(len(e) for e in graph.out_adj.values())
+    if args.json:
+        _emit({"nodes": len(graph.nodes), "edges": edge_count})
+    else:
+        print(f"Graph: {len(graph.nodes)} nodes, {edge_count} edges -> graph/")
+    return 0
+
+
+def cmd_flow_unit(args: Any) -> int:
+    ws = _ws()
+    flow = FlowComposer(ws).unit_flow(args.unit_id)
+    if args.json:
+        _emit(flow)
+        return 0
+    print(f"flow for {args.unit_id}  [{flow['state']}/{flow['confidence']}]")
+    print("  callees:")
+    for c in flow["direct_callees"]:
+        print(f"    -> {c['symbol']} [{c['confidence']}] ({c['unit_id']})")
+    print("  callers:")
+    for c in flow["direct_callers"]:
+        print(f"    <- {c['symbol']} [{c['confidence']}] ({c['unit_id']})")
+    return 0
+
+
+def cmd_flow_endpoint(args: Any) -> int:
+    ws = _ws()
+    spec = " ".join(args.spec)
+    parts = spec.split(None, 1)
+    if len(parts) != 2:
+        raise GroundrailError('endpoint must look like "GET /users/search"')
+    method, path = parts
+    flow = FlowComposer(ws).endpoint_flow(method, path)
+    if args.json:
+        _emit(flow)
+        return 0
+    ep = flow["endpoint"]
+    print(f"{ep['method']} {ep['path']}  [{flow['state']}/{flow['confidence']}]  "
+          f"root={flow['root_unit']}")
+    for n in flow["nodes"]:
+        print(f"  {'  ' * n['distance']}-> {n['symbol']} [{n['state']}/{n['confidence']}] "
+              f"({n['unit_id']})")
+    return 0
+
+
+def cmd_impact_file(args: Any) -> int:
+    ws = _ws()
+    report = ImpactEngine(ws).impact_file(args.path)
+    return _print_impact(report, args.json)
+
+
+def cmd_impact_unit(args: Any) -> int:
+    ws = _ws()
+    report = ImpactEngine(ws).impact_unit(args.unit_id)
+    return _print_impact(report, args.json)
+
+
+def cmd_tests_for(args: Any) -> int:
+    ws = _ws()
+    result = ImpactEngine(ws).tests_for(args.target)
+    if args.json:
+        _emit(result)
+        return 0
+    if result["coverage_gap"]:
+        print(f"tests-for {args.target}: NO reaching tests (coverage gap)")
+    else:
+        print(f"tests-for {args.target}: {len(result['tests'])} test(s)")
+        for t in result["tests"]:
+            print(f"  {t['symbol']} [d{t['distance']}/{t['confidence']}] ({t['unit_id']})")
+    return 0
+
+
+def _print_impact(report: dict[str, Any], as_json: bool) -> int:
+    if as_json:
+        _emit(report)
+        return 0
+    print(f"impact of {report['target']} ({report['target_kind']})")
+    print(f"  changed units: {len(report['changed_units'])}")
+    summary = report["summary"]
+    print(f"  impacted upstream: {summary.get('total', 0)} "
+          f"({', '.join(f'{k}={v}' for k, v in summary.items() if k != 'total')})")
+    for entry in report["impacted_upstream"][:25]:
+        print(f"    {entry['symbol']} [{entry['category']}/{entry['link_confidence']}] "
+              f"d{entry['distance']} ({entry['file_path']})")
+    if report["likely_tests"]:
+        print(f"  likely tests: {', '.join(t['symbol'] for t in report['likely_tests'])}")
+    if report["capability_gaps"]:
+        print(f"  gaps in target: {len(report['capability_gaps'])}")
     return 0
 
 

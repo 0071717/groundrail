@@ -111,6 +111,39 @@ def build_parser() -> argparse.ArgumentParser:
 
     add("smart", commands.cmd_smart, "print the latest session (pack + answer + audit)")
 
+    # flow / impact
+    p = add("graph", _flow_dispatch, "build the call graph")
+    gsub = p.add_subparsers(dest="graph_action", required=True)
+    gb = gsub.add_parser("build", help="build nodes + edges")
+    gb.set_defaults(func=commands.cmd_graph_build)
+    gb.add_argument("--json", action="store_true")
+
+    p = add("flow", _flow_dispatch, "show unit or endpoint flow")
+    fsub = p.add_subparsers(dest="flow_action", required=True)
+    fu = fsub.add_parser("unit", help="flow around a unit")
+    fu.set_defaults(func=commands.cmd_flow_unit)
+    fu.add_argument("unit_id")
+    fu.add_argument("--json", action="store_true")
+    fe = fsub.add_parser("endpoint", help='flow from an endpoint, e.g. "GET /users/search"')
+    fe.set_defaults(func=commands.cmd_flow_endpoint)
+    fe.add_argument("spec", nargs="+")
+    fe.add_argument("--json", action="store_true")
+
+    p = add("impact", _flow_dispatch, "show impact of a change")
+    imsub = p.add_subparsers(dest="impact_action", required=True)
+    imf = imsub.add_parser("file", help="impact of changing a file")
+    imf.set_defaults(func=commands.cmd_impact_file)
+    imf.add_argument("path")
+    imf.add_argument("--json", action="store_true")
+    imu = imsub.add_parser("unit", help="impact of changing a unit")
+    imu.set_defaults(func=commands.cmd_impact_unit)
+    imu.add_argument("unit_id")
+    imu.add_argument("--json", action="store_true")
+
+    p = add("tests-for", commands.cmd_tests_for, "find tests that reach a unit or file")
+    p.add_argument("target")
+    p.add_argument("--json", action="store_true")
+
     # evidence kernel
     p = add("validate", commands.cmd_validate, "validate artifact envelopes and records")
     p.add_argument("--strict", action="store_true")
@@ -137,6 +170,10 @@ def _analysis_dispatch(args):  # pragma: no cover
 
 
 def _audit_dispatch(args):  # pragma: no cover
+    return args.func(args)
+
+
+def _flow_dispatch(args):  # pragma: no cover
     return args.func(args)
 
 

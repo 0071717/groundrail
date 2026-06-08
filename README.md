@@ -92,12 +92,15 @@ The codebase is organised as three components rather than ten layers:
   that marks regex-derived boundaries `inferred` and emits gaps for dynamic patterns.
 - **`analyzer`** — AI unit analysis with provenance, uncertainty, secret-scanning,
   and stale binding; defaults to `state: inferred` and rejects any `verified` claim.
+- **`flow`** — call graph, unit/endpoint flows, and impact/test-selection with
+  weakest-link confidence (a composed flow is never stronger than its weakest edge,
+  and is capped at `inferred` since call resolution is heuristic).
 - **`router`** — retrieval, token-budgeted context packs, Kiro runner, and answer audit.
 
 `core` holds the shared trust contract (vocabulary, artifact envelope, evidence,
 storage, strict validation). Phases 1–4 of the revised roadmap — through the first
 useful product (`ask` with cited context packs) — plus Phase 6 (TypeScript/React
-extraction) are implemented and tested.
+extraction) and Phase 7 (flow & impact) are implemented and tested.
 
 ### Quickstart
 
@@ -113,15 +116,19 @@ groundrail analyze-units --missing      # AI analyses, stored as inferred + cite
 
 export GROUNDRAIL_KIRO_CMD='kiro-cli --prompt-file {context_pack}'
 groundrail ask "how does order total work?"   # context pack -> Kiro -> citation audit
+
+groundrail flow endpoint "POST /orders"        # trace an endpoint's call flow
+groundrail impact file app/services/orders.py  # blast radius of a change
+groundrail tests-for app/services/orders.py    # tests that reach a target
 ```
 
-Run the test suite with `pytest` (60 tests covering the trust contract, Python
+Run the test suite with `pytest` (71 tests covering the trust contract, Python
 and TypeScript/React extraction, strict validation, prompt-injection handling,
-and the audit loop).
+flow/impact weakest-link semantics, and the audit loop).
 
 ### Not yet implemented (deferred per the revised roadmap)
 
-Flow/impact composition (Phase 7), the full TUI, and the conductor/child-agent
-orchestration. Promotion is folded into review rather than kept as a separate
-layer. TypeScript extraction is regex/brace-based (not type-aware); deeper
-analysis (tsconfig path aliases, cross-file symbol resolution) is future work.
+The full TUI and the conductor/child-agent orchestration. Promotion is folded
+into review rather than kept as a separate layer. TypeScript extraction is
+regex/brace-based (not type-aware); call resolution is symbol-name based
+(no cross-file type resolution) — deeper analysis is future work.
