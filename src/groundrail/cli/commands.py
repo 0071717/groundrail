@@ -406,23 +406,60 @@ def cmd_orchestrations_list(args: Any) -> int:
 
 
 def cmd_orchestrations_show(args: Any) -> int:
-    ws = _ws(); store = OrchestrationStore(ws); oid = getattr(args, "orch_id", None) or store.latest_id()
-    if not oid: raise GroundrailError("no orchestrations; run an orchestrate command first")
-    data = {"plan": store.get_plan(oid), "events": store.get_events(oid), "findings": store.list_findings(oid), "quarantine": store.list_quarantine(oid)}
-    if args.json: _emit(data)
+    ws = _ws()
+    orch_store = OrchestrationStore(ws)
+    orch_id = getattr(args, "orch_id", None) or orch_store.latest_id()
+    if not orch_id:
+        raise GroundrailError("no orchestrations; run an orchestrate command first")
+    record = orch_store.get_orchestration(orch_id)
+    events = orch_store.get_events(orch_id)
+    findings = orch_store.list_findings(orch_id)
+    quarantine = orch_store.list_quarantine(orch_id)
+    if args.json:
+        _emit({"orchestration": record, "events": events, "findings": findings, "quarantine": quarantine})
     else:
-        plan = data["plan"]; print(f"orchestration: {plan['orchestration_id']}"); print(f"  workflow: {plan['workflow']}"); print(f"  request:  {plan['request']}"); print(f"  status:   {plan['status']}"); print(f"  created:  {plan['created_at']}")
-        print(f"\nevents ({len(data['events'])}):"); [print(f"  [{ev['ts']}] {ev['event']}") for ev in data["events"]]
+        print(f"orchestration: {record['orchestration_id']}")
+        print(f"  workflow: {record['workflow']}")
+        print(f"  request:  {record['request']}")
+        print(f"  status:   {record['status']}")
+        print(f"  created:  {record['created_at']}")
+        print(f"\nevents ({len(events)}):")
+        for ev in events:
+            print(f"  [{ev['ts']}] {ev['event']}")
+        print(f"\nfindings ({len(findings)}):")
+        for f in findings:
+            n = len(f.get("findings", []))
+            print(f"  task {f.get('task_id', '?')}: {f.get('verdict', '?')} — {n} item(s)")
+        if quarantine:
+            print(f"\nquarantine ({len(quarantine)}):")
+            for q in quarantine:
+                print(f"  task {q['task_id']}: {q['reason']}")
     return 0
 
 
 def cmd_synthesize(args: Any) -> int:
-    ws = _ws(); store = OrchestrationStore(ws); oid = getattr(args, "orch_id", None) or store.latest_id()
-    if not oid: raise GroundrailError("no orchestrations to synthesize")
-    plan = store.get_plan(oid); result = synthesize(store.list_findings(oid), orchestration_id=oid, workflow=plan["workflow"], request=plan["request"]); store.write_synthesis(oid, result)
-    if args.json: _emit(result)
+    ws = _ws()
+    orch_store = OrchestrationStore(ws)
+    orch_id = getattr(args, "orch_id", None) or orch_store.latest_id()
+    if not orch_id:
+        raise GroundrailError("no orchestrations to synthesize")
+    record = orch_store.get_orchestration(orch_id)
+    findings = orch_store.list_findings(orch_id)
+    result = synthesize(
+        findings,
+        orchestration_id=orch_id,
+        workflow=record["workflow"],
+        request=record["request"],
+    )
+    orch_store.write_synthesis(orch_id, result)
+    if args.json:
+        _emit(result)
     else:
-        print(f"synthesis: {oid}"); print(f"  workflow:   {result['workflow']}"); print(f"  confidence: {result['overall_confidence']}"); print(f"  findings:   {result['finding_count']}"); print(f"  conflicts:  {result['conflict_count']}")
+        print(f"synthesis: {orch_id}")
+        print(f"  workflow:   {result['workflow']}")
+        print(f"  confidence: {result['overall_confidence']}")
+        print(f"  findings:   {result['finding_count']}")
+        print(f"  conflicts:  {result['conflict_count']}")
     return 0
 
 
@@ -436,6 +473,37 @@ def cmd_conflicts(args: Any) -> int:
     else:
         print(f"{len(conflicts)} conflict(s) in {oid}:") if conflicts else print(f"no conflicts in orchestration {oid}")
         for c in conflicts: print(f"  {c['description']}\n    finding ids: {c['finding_ids']}")
+    return 0
+
+
+def cmd_agents_list(args: Any) -> int:
+    ws = _ws()
+    orch_store = OrchestrationStore(ws)
+    show_quarantine = getattr(args, "quarantine", False)
+    if show_quarantine:
+        items = orch_store.list_agent_quarantine()
+        label = "quarantined"
+    else:
+        items = orch_store.list_agent_findings()
+        label = "finding"
+    if args.json:
+        _emit(items)
+    else:
+        if not items:
+            print(f"no agent {label}s")
+        for item in items:
+            if show_quarantine:
+                print(
+                    f"  {item.get('orchestration_id', '?')}  task={item.get('task_id', '?')}  "
+                    f"reason={item.get('reason', '?')}"
+                )
+            else:
+                print(
+                    f"  {item.get('orchestration_id', '?')}  task={item.get('task_id', '?')}  "
+                    f"verdict={item.get('verdict', '?')}  confidence={item.get('confidence', '?')}  "
+                    f"findings={item.get('finding_count', 0)}"
+                )
+        print(f"\n{len(items)} {label}(s)")
     return 0
 
 

@@ -91,7 +91,9 @@ def build_parser() -> argparse.ArgumentParser:
     orsh = orsub.add_parser("show"); orsh.set_defaults(func=commands.cmd_orchestrations_show); orsh.add_argument("orch_id", nargs="?", default=None); orsh.add_argument("--json", action="store_true")
     p = add("synthesize", commands.cmd_synthesize, "synthesize findings"); p.add_argument("orch_id", nargs="?", default=None); p.add_argument("--json", action="store_true")
     p = add("conflicts", commands.cmd_conflicts, "show conflicts"); p.add_argument("orch_id", nargs="?", default=None); p.add_argument("--json", action="store_true")
-    p = add("agent-validate", commands.cmd_agent_validate, "validate agent result"); p.add_argument("result_file")
+    p = add("agents", _agents_dispatch, "list or validate agent findings"); agsub = p.add_subparsers(dest="agents_action", required=True)
+    agl = agsub.add_parser("list"); agl.set_defaults(func=commands.cmd_agents_list); agl.add_argument("--quarantine", action="store_true"); agl.add_argument("--json", action="store_true")
+    agv = agsub.add_parser("validate"); agv.set_defaults(func=commands.cmd_agent_validate); agv.add_argument("result_file")
 
     p = add("validate", commands.cmd_validate, "validate artifacts"); p.add_argument("--strict", action="store_true")
     p = add("verify", commands.cmd_verify, "verify freshness"); p.add_argument("--strict", action="store_true"); p.add_argument("--json", action="store_true")
@@ -117,6 +119,7 @@ def _audit_dispatch(args): return args.func(args)
 def _flow_dispatch(args): return args.func(args)
 def _orchestrate_dispatch(args): return args.func(args)
 def _orchestrations_dispatch(args): return args.func(args)
+def _agents_dispatch(args): return args.func(args)
 def _eval_dispatch(args): return args.func(args)
 
 

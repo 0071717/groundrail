@@ -51,18 +51,18 @@ def _preflight(workspace: Workspace) -> dict[str, Any]:
 
     stale_count = 0
     missing_count = 0
+    units: list[Any] = []
     try:
         units = list(UnitStore(store).all())
         analyses = AnalysisStore(store)
         for unit in units:
-            analysis = analyses.get(unit["unit_id"])
+            analysis = analyses.try_get(unit["unit_id"])
             if analysis is None:
                 missing_count += 1
             elif analyses.is_stale(analysis, unit):
                 stale_count += 1
     except Exception:
         warnings.append("could not check analysis freshness")
-        units = []
 
     if stale_count:
         warnings.append(
@@ -76,7 +76,7 @@ def _preflight(workspace: Workspace) -> dict[str, Any]:
     return {
         "ok": not any("no snapshot" in w or "no unit index" in w for w in warnings),
         "warnings": warnings,
-        "unit_count": len(units) if "units" in dir() else 0,
+        "unit_count": len(units),
         "stale_count": stale_count,
         "missing_count": missing_count,
     }
@@ -291,8 +291,17 @@ class OrchestratorWorkflow:
         use_agent = (not no_agent) and self.agent.configured
         task_id = f"task-{uuid.uuid4().hex[:12]}"
 
+        # Write the plan (ordered task steps) so get_plan() callers always succeed.
+        self.store.write_plan(orch_id, [
+            {
+                "task_id": task_id,
+                "type": "agent" if use_agent else "no_agent",
+                "description": f"{workflow}: {request}",
+            }
+        ])
+
         if use_agent:
-            prompt = _build_agent_prompt(workflow, request, pack)
+            prompt = _build_agent_prompt(workflow, request, pack, self.ws)
             self.store.log_event(orch_id, "agent_dispatched", {"task_id": task_id})
             result, errors = self.agent.dispatch(
                 orch_store=self.store,
@@ -323,10 +332,17 @@ class OrchestratorWorkflow:
 
 
 def _build_agent_prompt(
-    workflow: str, request: str, pack: dict[str, Any]
+    workflow: str, request: str, pack: dict[str, Any], workspace: Workspace
 ) -> str:
     """Build the structured task prompt sent to the child agent."""
-    pack_md = ContextPackBuilder.render_markdown(None, pack)  # type: ignore[arg-type]
+    # The markdown was already written to the session file during build(); read it
+    # from there rather than re-rendering (which would require a live ContextPackBuilder).
+    session_id = pack.get("session_id", "")
+    pack_md = ""
+    if session_id:
+        md_path = workspace.store.resolve(f"sessions/{session_id}/context-pack.md")
+        if md_path.exists():
+            pack_md = md_path.read_text(encoding="utf-8")
     units = pack.get("source_evidence", [])
 
     instructions = {

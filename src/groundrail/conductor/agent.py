@@ -27,9 +27,10 @@ _VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low", "info"})
 _VALID_SUPPORTS = frozenset({"supported", "inferred", "not_confirmed", "contradicted", "out_of_scope"})
 _VALID_CONFIDENCES = frozenset({"high", "medium", "low"})
 
-# Canonical artifact fields — if an agent result carries these it is attempting
-# to impersonate a canonical Groundrail artifact, which is forbidden.
-_CANONICAL_FIELDS = frozenset({"artifact_kind", "artifact_id", "schema_version"})
+# Fields that mark a Groundrail *canonical* artifact — agents may not emit these
+# because they would impersonate a unit-index or analysis artifact.
+# schema_version is intentionally NOT included: docs/02 requires it in agent results.
+_CANONICAL_FIELDS = frozenset({"artifact_kind", "artifact_id"})
 
 
 def extract_result_block(text: str) -> str | None:
@@ -44,9 +45,11 @@ def validate_agent_result(result: dict[str, Any]) -> list[str]:
     errors: list[str] = []
 
     # --- top-level required fields ------------------------------------------
-    for field in ("task_id", "agent_profile", "status", "verdict", "confidence", "summary"):
+    for field in ("schema_version", "task_id", "agent_profile", "status", "verdict", "confidence", "summary"):
         if not result.get(field):
             errors.append(f"missing required field: {field!r}")
+    if result.get("schema_version") and result.get("schema_version") != "1":
+        errors.append(f"schema_version must be '1', got {result.get('schema_version')!r}")
 
     if result.get("status") not in _VALID_STATUSES:
         errors.append(f"invalid status {result.get('status')!r}")

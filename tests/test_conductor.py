@@ -26,6 +26,7 @@ from groundrail.conductor.workflows import OrchestratorWorkflow
 
 def _valid_result(task_id: str = "task-abc", **overrides) -> dict:
     base = {
+        "schema_version": "1",
         "task_id": task_id,
         "agent_profile": "test-agent",
         "status": "completed",
@@ -82,8 +83,8 @@ def test_orchestration_update_status(workspace):
     store = OrchestrationStore(workspace)
     oid = store.create("plan", "implement search feature")
     store.update_status(oid, "completed")
-    plan = store.get_plan(oid)
-    assert plan["status"] == "completed"
+    record = store.get_orchestration(oid)
+    assert record["status"] == "completed"
 
 
 def test_finding_stored_and_retrieved(workspace):
@@ -158,6 +159,19 @@ def test_validate_rejects_verified_state():
     assert any("verified" in e for e in errors)
 
 
+def test_validate_requires_schema_version():
+    obj = _valid_result()
+    del obj["schema_version"]
+    errors = validate_agent_result(obj)
+    assert any("schema_version" in e for e in errors)
+
+
+def test_validate_rejects_wrong_schema_version():
+    obj = _valid_result(schema_version="2")
+    errors = validate_agent_result(obj)
+    assert any("schema_version" in e for e in errors)
+
+
 def test_validate_rejects_canonical_fields():
     obj = _valid_result(artifact_kind="unit_analysis")
     errors = validate_agent_result(obj)
@@ -168,6 +182,13 @@ def test_validate_rejects_artifact_id_field():
     obj = _valid_result(artifact_id="some.artifact")
     errors = validate_agent_result(obj)
     assert any("canonical" in e for e in errors)
+
+
+def test_schema_version_in_valid_result_is_accepted():
+    # schema_version: "1" is REQUIRED (docs/02), not a forbidden canonical field
+    obj = _valid_result(schema_version="1")
+    errors = validate_agent_result(obj)
+    assert not errors
 
 
 def test_validate_rejects_invalid_status():
@@ -361,8 +382,11 @@ def test_no_agent_debug_workflow_creates_orchestration(indexed_workspace):
     assert outcome["mode"] == "no_agent"
     assert outcome["workflow"] == "debug"
     orch_store = OrchestrationStore(indexed_workspace)
+    record = orch_store.get_orchestration(outcome["orchestration_id"])
+    assert record["status"] == "completed"
+    # plan.json (task steps) must also exist after run()
     plan = orch_store.get_plan(outcome["orchestration_id"])
-    assert plan["status"] == "completed"
+    assert plan["tasks"]
 
 
 def test_no_agent_plan_workflow_writes_finding(indexed_workspace):
@@ -494,7 +518,7 @@ def test_cli_agent_validate_valid_file(tmp_path, capsys):
     obj = _valid_result()
     f = tmp_path / "result.txt"
     f.write_text(_wrap(obj), encoding="utf-8")
-    rc = main(["agent-validate", str(f)])
+    rc = main(["agents", "validate", str(f)])
     assert rc == 0
     assert "VALID" in capsys.readouterr().out
 
@@ -503,7 +527,7 @@ def test_cli_agent_validate_invalid_file(tmp_path, capsys):
     obj = _valid_result(status="bad_status")
     f = tmp_path / "result.txt"
     f.write_text(_wrap(obj), encoding="utf-8")
-    rc = main(["agent-validate", str(f)])
+    rc = main(["agents", "validate", str(f)])
     assert rc == 1
 
 
@@ -511,7 +535,33 @@ def test_cli_agent_validate_canonical_attempt_rejected(tmp_path, capsys):
     obj = _valid_result(artifact_kind="unit_analysis")
     f = tmp_path / "result.txt"
     f.write_text(_wrap(obj), encoding="utf-8")
-    rc = main(["agent-validate", str(f)])
+    rc = main(["agents", "validate", str(f)])
     assert rc == 1
     out = capsys.readouterr().out
     assert "canonical" in out
+
+
+def test_cli_agents_list_empty(workspace, monkeypatch, capsys):
+    monkeypatch.chdir(workspace.project_root)
+    rc = main(["agents", "list"])
+    assert rc == 0
+    assert "no agent finding" in capsys.readouterr().out
+
+
+def test_cli_agents_list_after_orchestration(indexed_workspace, monkeypatch, capsys):
+    monkeypatch.chdir(indexed_workspace.project_root)
+    main(["orchestrate", "debug", "list test", "--no-agent"])
+    capsys.readouterr()  # clear orchestrate output
+    rc = main(["agents", "list"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "finding(s)" in out or "no agent finding" in out
+
+
+def test_plan_json_written_after_workflow(indexed_workspace):
+    orchestrator = OrchestratorWorkflow(indexed_workspace)
+    outcome = orchestrator.run("plan", "add endpoint", no_agent=True)
+    store = OrchestrationStore(indexed_workspace)
+    plan = store.get_plan(outcome["orchestration_id"])
+    assert plan["tasks"]
+    assert plan["tasks"][0]["type"] == "no_agent"
