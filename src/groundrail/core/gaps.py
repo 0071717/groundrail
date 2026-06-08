@@ -19,9 +19,10 @@ class CapabilityGapRegistry:
     def __init__(self, store: ArtifactStore) -> None:
         self.store = store
         self._gaps: list[dict[str, Any]] = []
+        self._keys: set[tuple[str, str, str, str]] = set()
 
     def add(self, *, kind: str, repo: str, location: str, detail: str, severity: str = "info") -> None:
-        self._gaps.append(
+        self._add_record(
             {
                 "kind": kind,
                 "repo": repo,
@@ -33,7 +34,9 @@ class CapabilityGapRegistry:
         )
 
     def extend(self, gaps: list[dict[str, Any]]) -> None:
-        self._gaps.extend(gaps)
+        for gap in gaps:
+            if isinstance(gap, dict):
+                self._add_record(gap)
 
     @property
     def gaps(self) -> list[dict[str, Any]]:
@@ -54,3 +57,23 @@ class CapabilityGapRegistry:
         if not self.store.exists(GAPS_PATH):
             return []
         return self.store.read_json(GAPS_PATH).get("data", {}).get("gaps", [])
+
+    def _add_record(self, gap: dict[str, Any]) -> None:
+        normalised = {
+            "kind": str(gap.get("kind", "unknown")),
+            "repo": str(gap.get("repo", "")),
+            "location": str(gap.get("location", "")),
+            "detail": str(gap.get("detail", "")),
+            "severity": str(gap.get("severity", "info")),
+            "state": str(gap.get("state", "unsupported")),
+        }
+        key = (
+            normalised["kind"],
+            normalised["repo"],
+            normalised["location"],
+            normalised["detail"],
+        )
+        if key in self._keys:
+            return
+        self._keys.add(key)
+        self._gaps.append(normalised)
