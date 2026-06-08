@@ -7,7 +7,7 @@ import sys
 
 from .. import __version__
 from ..core.errors import GroundrailError
-from . import commands
+from . import commands, layer_commands
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,6 +84,68 @@ def build_parser() -> argparse.ArgumentParser:
     av.set_defaults(func=commands.cmd_analysis_validate)
     av.add_argument("--strict", action="store_true")
 
+    # human review / confirmation
+    p = add("review", _review_dispatch, "review, confirm, reject, and stale-check AI knowledge")
+    rsub = p.add_subparsers(dest="review_action", required=True)
+    rl = rsub.add_parser("list", help="list reviewable analyses, claims, notes, and uncertainties")
+    rl.set_defaults(func=layer_commands.cmd_review_list)
+    rl.add_argument("--limit", type=int, default=50)
+    rl.add_argument("--json", action="store_true")
+    rs = rsub.add_parser("show", help="show one review item")
+    rs.set_defaults(func=layer_commands.cmd_review_show)
+    rs.add_argument("item_id")
+    rs.add_argument("--json", action="store_true")
+    for action, func in [("confirm", layer_commands.cmd_review_confirm), ("reject", layer_commands.cmd_review_reject)]:
+        rp = rsub.add_parser(action, help=f"{action} a review item")
+        rp.set_defaults(func=func)
+        rp.add_argument("item_id")
+        rp.add_argument("--reviewer", default="developer")
+        rp.add_argument("--note", default="")
+        rp.add_argument("--json", action="store_true")
+    rst = rsub.add_parser("stale", help="list stale developer confirmations")
+    rst.set_defaults(func=layer_commands.cmd_review_stale)
+    rst.add_argument("--json", action="store_true")
+
+    p = add("notes", _notes_dispatch, "inspect and review AI notes/uncertainties")
+    nsub = p.add_subparsers(dest="notes_action", required=True)
+    nl = nsub.add_parser("list", help="list AI notes and uncertainties")
+    nl.set_defaults(func=layer_commands.cmd_notes_list)
+    nl.add_argument("--limit", type=int, default=50)
+    nl.add_argument("--json", action="store_true")
+    ns = nsub.add_parser("show", help="show one note")
+    ns.set_defaults(func=layer_commands.cmd_notes_show)
+    ns.add_argument("item_id")
+    ns.add_argument("--json", action="store_true")
+    for action, func in [("confirm", layer_commands.cmd_notes_confirm), ("reject", layer_commands.cmd_notes_reject)]:
+        np = nsub.add_parser(action, help=f"{action} a note")
+        np.set_defaults(func=func)
+        np.add_argument("item_id")
+        np.add_argument("--reviewer", default="developer")
+        np.add_argument("--note", default="")
+        np.add_argument("--json", action="store_true")
+
+    # promotion / knowledge
+    p = add("promote", _promote_dispatch, "promote confirmed non-stale claims into knowledge")
+    psub = p.add_subparsers(dest="promote_action", required=True)
+    pc = psub.add_parser("list-candidates", help="list conservative promotion candidates")
+    pc.set_defaults(func=layer_commands.cmd_promote_candidates)
+    pc.add_argument("--json", action="store_true")
+    pp = psub.add_parser("claim", help="promote one confirmed claim")
+    pp.set_defaults(func=layer_commands.cmd_promote_claim)
+    pp.add_argument("item_id")
+    pp.add_argument("--promoted-by", default="developer")
+    pp.add_argument("--json", action="store_true")
+
+    p = add("knowledge", _knowledge_dispatch, "inspect promoted knowledge facts")
+    ksub = p.add_subparsers(dest="knowledge_action", required=True)
+    kl = ksub.add_parser("list", help="list knowledge facts")
+    kl.set_defaults(func=layer_commands.cmd_knowledge_list)
+    kl.add_argument("--json", action="store_true")
+    ks = ksub.add_parser("show", help="show a knowledge fact")
+    ks.set_defaults(func=layer_commands.cmd_knowledge_show)
+    ks.add_argument("fact_id")
+    ks.add_argument("--json", action="store_true")
+
     # router
     p = add("search", commands.cmd_search, "search the retrieval index")
     p.add_argument("query")
@@ -95,6 +157,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("request", nargs="+")
     p.add_argument("--allow-inferred-low", action="store_true", dest="allow_inferred_low")
     p.add_argument("--json", action="store_true")
+
+    p = add("ctx", _ctx_dispatch, "inspect context-pack selection decisions")
+    csub = p.add_subparsers(dest="ctx_action", required=True)
+    ce = csub.add_parser("explain", help="show selection-explain for a session")
+    ce.set_defaults(func=layer_commands.cmd_ctx_explain)
+    ce.add_argument("session", nargs="?", default="latest")
+    ce.add_argument("--json", action="store_true")
 
     p = add("ask", commands.cmd_ask, "build a context pack and run Kiro")
     p.add_argument("question", nargs="+")
@@ -201,6 +270,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = add("doctor", commands.cmd_doctor, "diagnose workspace + configuration")
     p.add_argument("--json", action="store_true")
 
+    p = add("map", layer_commands.cmd_map, "show the implemented end-to-end Groundrail layer map")
+    p.add_argument("--json", action="store_true")
+
+    p = add("eval", _eval_dispatch, "run built-in trust regression checks")
+    esub = p.add_subparsers(dest="eval_action", required=True)
+    er = esub.add_parser("run", help="run the built-in evaluation checks")
+    er.set_defaults(func=layer_commands.cmd_eval_run)
+    er.add_argument("--strict", action="store_true")
+    er.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -219,6 +298,26 @@ def _analysis_dispatch(args):  # pragma: no cover
     return args.func(args)
 
 
+def _review_dispatch(args):  # pragma: no cover
+    return args.func(args)
+
+
+def _notes_dispatch(args):  # pragma: no cover
+    return args.func(args)
+
+
+def _promote_dispatch(args):  # pragma: no cover
+    return args.func(args)
+
+
+def _knowledge_dispatch(args):  # pragma: no cover
+    return args.func(args)
+
+
+def _ctx_dispatch(args):  # pragma: no cover
+    return args.func(args)
+
+
 def _audit_dispatch(args):  # pragma: no cover
     return args.func(args)
 
@@ -232,6 +331,10 @@ def _orchestrate_dispatch(args):  # pragma: no cover
 
 
 def _orchestrations_dispatch(args):  # pragma: no cover
+    return args.func(args)
+
+
+def _eval_dispatch(args):  # pragma: no cover
     return args.func(args)
 
 
