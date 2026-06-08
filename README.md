@@ -96,11 +96,13 @@ The codebase is organised as three components rather than ten layers:
   weakest-link confidence (a composed flow is never stronger than its weakest edge,
   and is capped at `inferred` since call resolution is heuristic).
 - **`router`** — retrieval, token-budgeted context packs, Kiro runner, and answer audit.
+- **`tui`** — a read-only curses cockpit (dashboard, unit browser, sessions, gaps)
+  that renders service view models; it computes no trust of its own.
 
 `core` holds the shared trust contract (vocabulary, artifact envelope, evidence,
 storage, strict validation). Phases 1–4 of the revised roadmap — through the first
 useful product (`ask` with cited context packs) — plus Phase 6 (TypeScript/React
-extraction) and Phase 7 (flow & impact) are implemented and tested.
+extraction), Phase 7 (flow & impact), and the read-only TUI are implemented and tested.
 
 ### Quickstart
 
@@ -120,15 +122,20 @@ groundrail ask "how does order total work?"   # context pack -> Kiro -> citation
 groundrail flow endpoint "POST /orders"        # trace an endpoint's call flow
 groundrail impact file app/services/orders.py  # blast radius of a change
 groundrail tests-for app/services/orders.py    # tests that reach a target
+
+groundrail tui                                 # interactive cockpit (needs a TTY)
+groundrail tui --print dashboard               # text snapshot of any screen
 ```
 
-Run the test suite with `pytest` (71 tests covering the trust contract, Python
+Run the test suite with `pytest` (81 tests covering the trust contract, Python
 and TypeScript/React extraction, strict validation, prompt-injection handling,
-flow/impact weakest-link semantics, and the audit loop).
+flow/impact weakest-link semantics, the audit loop, and the TUI view/render layer).
 
 ### Not yet implemented (deferred per the revised roadmap)
 
-The full TUI and the conductor/child-agent orchestration. Promotion is folded
-into review rather than kept as a separate layer. TypeScript extraction is
-regex/brace-based (not type-aware); call resolution is symbol-name based
-(no cross-file type resolution) — deeper analysis is future work.
+The conductor/child-agent orchestration — deliberately last, per the review,
+since it adds the most complexity and is least valuable until the base layers
+have real users. Promotion is folded into review rather than kept as a separate
+layer. TypeScript extraction is regex/brace-based (not type-aware); call
+resolution is symbol-name based (no cross-file type resolution) — deeper analysis
+is future work. The TUI is intentionally read-only.

@@ -322,6 +322,39 @@ def cmd_audit_answer(args: Any) -> int:
     return 0
 
 
+def cmd_tui(args: Any) -> int:
+    import shutil
+    import sys
+
+    from ..tui import screens
+    from ..tui.viewmodels import ViewModelBuilder
+
+    ws = _ws()
+    builder = ViewModelBuilder(ws)
+
+    if args.print:
+        ui = screens.default_ui()
+        ui["screen"] = args.print
+        if args.print == "unit":
+            if not args.unit:
+                raise GroundrailError("tui --print unit requires --unit <unit-id>")
+            ui["selected_unit"] = args.unit
+        if args.print == "session":
+            ui["selected_session"] = args.session or SessionStore(ws.store).latest_id()
+        width = shutil.get_terminal_size((100, 40)).columns
+        print("\n".join(screens.compose(builder, ui, width, None)))
+        return 0
+
+    if not sys.stdout.isatty():
+        raise GroundrailError(
+            "tui requires an interactive terminal; use `groundrail tui --print <screen>`"
+        )
+    from ..tui.app import run
+
+    run(ws)
+    return 0
+
+
 def cmd_smart(args: Any) -> int:
     ws = _ws()
     sessions = SessionStore(ws.store)

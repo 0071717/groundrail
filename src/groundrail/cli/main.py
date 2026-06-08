@@ -111,6 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     add("smart", commands.cmd_smart, "print the latest session (pack + answer + audit)")
 
+    p = add("tui", commands.cmd_tui, "interactive cockpit (or --print for a text snapshot)")
+    p.add_argument("--print", choices=["dashboard", "units", "sessions", "gaps", "unit", "session"],
+                   help="render one screen as text and exit (no TTY needed)")
+    p.add_argument("--unit", help="unit id for --print unit")
+    p.add_argument("--session", help="session id for --print session")
+
     # flow / impact
     p = add("graph", _flow_dispatch, "build the call graph")
     gsub = p.add_subparsers(dest="graph_action", required=True)
