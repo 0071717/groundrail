@@ -2,8 +2,7 @@
 
 This is not a benchmark suite yet; it is a regression guard for the trust model.
 It checks that generated artifacts do not overclaim verified AI truth, stale
-analyses are visible, retrieval exists, and citation audits are present when Kiro
-has been run.
+analyses are visible, retrieval exists, and capability gaps stay readable.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from ..core.gaps import CapabilityGapRegistry
 from ..core.store import ArtifactStore
 from ..core.workspace import Workspace
 from ..indexer.unit_index import UNIT_INDEX_PATH, UnitStore
-from ..router.retrieval import RETRIEVAL_INDEX_PATH
+from ..router.retrieval import RETRIEVAL_PATH
 
 EVAL_REPORT_PATH = "audit/eval-report.json"
 
@@ -81,12 +80,12 @@ class EvaluationRunner:
         }
 
     def _check_retrieval_exists(self) -> dict[str, Any]:
-        exists = self.store.exists(RETRIEVAL_INDEX_PATH)
+        exists = self.store.exists(RETRIEVAL_PATH)
         return {
             "name": "retrieval_index_present",
             "status": "ok" if exists else "warn",
             "detail": "retrieval index exists" if exists else "run `groundrail search` or `groundrail prepare`",
-            "artifact": RETRIEVAL_INDEX_PATH,
+            "artifact": RETRIEVAL_PATH,
         }
 
     def _check_gap_registry_readable(self) -> dict[str, Any]:
