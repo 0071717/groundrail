@@ -272,13 +272,35 @@ class ContextPackBuilder:
             lines.append("")
 
         rules = pack["citation_rules"]
-        lines.append("## Citation rules")
+        lines.append("## Mandatory citation contract")
         lines.append(
-            f"End your answer with a `<{rules['required_block']}>` JSON block citing the "
-            f"fact/unit/analysis/evidence IDs you used. For any claim Groundrail does not "
-            f"support, mark it: \"{rules['unsupported_phrase']}\". Do not present inferred "
-            f"analyses as verified."
+            f"You MUST end every answer with exactly one `<{rules['required_block']}>` JSON block. "
+            "Every substantive claim in your answer must have one entry in `claims`. "
+            f"For anything not supported by the ids in this context pack, write \"{rules['unsupported_phrase']}\" "
+            "in the answer text and set support to `not_confirmed`."
         )
+        lines.append("")
+        lines.append("Allowed support values: `supported`, `inferred`, `not_confirmed`, `contradicted`.")
+        lines.append("Use `supported` only for source evidence or developer-confirmed promoted facts. Use `inferred` for AI analysis.")
+        lines.append("Do not invent ids. Do not cite stale or missing ids. Do not present inferred analyses as verified.")
+        lines.append("")
+        lines.append("Citation block schema:")
+        lines.append("```json")
+        lines.append("{")
+        lines.append('  "claims": [')
+        lines.append("    {")
+        lines.append('      "claim_id": "claim-001",')
+        lines.append('      "text": "Short paraphrase of the claim",')
+        lines.append('      "support": "supported",')
+        lines.append('      "fact_ids": [],')
+        lines.append('      "unit_ids": [],')
+        lines.append('      "analysis_ids": [],')
+        lines.append('      "evidence_ids": []')
+        lines.append("    }")
+        lines.append("  ]")
+        lines.append("}")
+        lines.append("```")
+        lines.append(f"Wrap only the JSON object, not the fenced code block, in `<{rules['required_block']}>...</{rules['required_block']}>`.")
         return "\n".join(lines) + "\n"
 
     def _analysis_md(self, a: dict[str, Any]) -> str:
