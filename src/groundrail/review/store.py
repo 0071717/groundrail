@@ -7,6 +7,7 @@ review status to an analysis, claim, or note.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from ..analyzer.store import AnalysisStore, analysis_path
@@ -110,7 +111,7 @@ class ReviewStore:
         if not changed:
             raise NotFoundError(f"unknown review item: {item_id}")
         record = {
-            "review_id": f"review.{timeutil.compact_id()}",
+            "review_id": f"review.{uuid.uuid4().hex[:12]}",
             "item_id": item_id,
             "analysis_id": analysis_id,
             "unit_id": analysis["unit_id"],
