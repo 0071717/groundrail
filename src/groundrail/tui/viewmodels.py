@@ -11,12 +11,16 @@ from typing import Any
 from ..analyzer.store import AnalysisStore
 from ..core.gaps import CapabilityGapRegistry
 from ..core.workspace import Workspace
+from ..evaluation.runner import EVAL_REPORT_PATH
 from ..flow.graph import Graph, GraphBuilder
 from ..indexer.snapshot import FILE_INDEX_PATH, load_file_index
 from ..indexer.unit_index import UnitStore
+from ..knowledge import KnowledgeStore
+from ..layers import LayerMapBuilder
+from ..review import ReviewStore
 from ..router.session import SessionStore
 
-SCREENS = ("dashboard", "units", "sessions", "gaps")
+SCREENS = ("dashboard", "units", "review", "knowledge", "sessions", "gaps", "map", "eval")
 
 
 class ViewModelBuilder:
@@ -26,6 +30,8 @@ class ViewModelBuilder:
         self.units = UnitStore(self.store)
         self.analyses = AnalysisStore(self.store)
         self.sessions = SessionStore(self.store)
+        self.reviews = ReviewStore(self.store)
+        self.knowledge = KnowledgeStore(self.store)
         self._graph: Graph | None = None
 
     @property
@@ -47,6 +53,11 @@ class ViewModelBuilder:
         kinds: dict[str, int] = {}
         for u in units:
             kinds[u["kind"]] = kinds.get(u["kind"], 0) + 1
+        review_items = self.reviews.queue()
+        facts = self.knowledge.all()
+        layer_map = LayerMapBuilder(self.ws).build(write=False)
+        ready_layers = sum(1 for layer in layer_map["layers"] if layer["workspace_ready"])
+        eval_status = self.eval_report().get("status", "not_run")
         return {
             "files": len(load_file_index(self.store)) if self.store.exists(FILE_INDEX_PATH) else 0,
             "units": len(units),
@@ -57,6 +68,12 @@ class ViewModelBuilder:
             "gaps": len(CapabilityGapRegistry(self.store).load()),
             "sessions": self._session_ids(),
             "latest_session": self._latest_session_brief(),
+            "review_items": len(review_items),
+            "confirmed_items": sum(1 for i in review_items if i.get("review_status") == "dev_confirmed"),
+            "knowledge_facts": len(facts),
+            "layers_ready": ready_layers,
+            "layers_total": len(layer_map["layers"]),
+            "eval_status": eval_status,
         }
 
     # --- units ---------------------------------------------------------------
@@ -98,6 +115,13 @@ class ViewModelBuilder:
             "source": self._source_lines(unit),
         }
 
+    # --- review / knowledge --------------------------------------------------
+    def review_rows(self) -> list[dict[str, Any]]:
+        return self.reviews.queue()
+
+    def knowledge_rows(self) -> list[dict[str, Any]]:
+        return self.knowledge.all()
+
     # --- sessions ------------------------------------------------------------
     def sessions_rows(self) -> list[dict[str, Any]]:
         rows = []
@@ -108,6 +132,8 @@ class ViewModelBuilder:
                 brief["mode"] = pack.get("mode", "")
                 brief["request"] = pack.get("request", "")
                 brief["freshness"] = pack.get("freshness", {}).get("status", "")
+                brief["facts"] = len(pack.get("selected_facts", []))
+                brief["analyses"] = len(pack.get("selected_unit_analyses", []))
             if self.sessions.has(sid, "audit.json"):
                 brief["audit"] = self.sessions.read(sid, "audit.json").get("status", "")
             rows.append(brief)
@@ -127,9 +153,17 @@ class ViewModelBuilder:
             detail["audit"] = self.sessions.read(session_id, "audit.json")
         return detail
 
-    # --- gaps ----------------------------------------------------------------
+    # --- gaps / map / eval ---------------------------------------------------
     def gaps_rows(self) -> list[dict[str, Any]]:
         return CapabilityGapRegistry(self.store).load()
+
+    def layer_map(self) -> dict[str, Any]:
+        return LayerMapBuilder(self.ws).build(write=False)
+
+    def eval_report(self) -> dict[str, Any]:
+        if not self.store.exists(EVAL_REPORT_PATH):
+            return {"status": "not_run", "checks": []}
+        return self.store.read_json(EVAL_REPORT_PATH).get("data", {})
 
     # --- helpers -------------------------------------------------------------
     def _sym(self, unit_id: str) -> str:
