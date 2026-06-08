@@ -46,7 +46,8 @@ class KnowledgeStore:
                         "text": claim.get("text", ""),
                         "eligible": not stale,
                         "reason": "ok" if not stale else "stale_source",
-                        "confidence": claim.get("confidence", analysis.get("confidence", vocab.CONFIDENCE_LOW)),
+                        "confidence": analysis.get("confidence", vocab.CONFIDENCE_LOW),
+                        "claim_confidence": claim.get("confidence", 0.0),
                     })
         return out
 
@@ -68,6 +69,7 @@ class KnowledgeStore:
             "text": candidate["text"],
             "state": vocab.STATUS_INFERRED,
             "confidence": candidate["confidence"],
+            "claim_confidence": candidate["claim_confidence"],
             "review_status": vocab.REVIEW_DEV_CONFIRMED,
             "promoted_by": promoted_by,
             "promoted_at": timeutil.now_iso(),
