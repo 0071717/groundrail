@@ -204,6 +204,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _normalise_args(args: argparse.Namespace) -> None:
+    """Apply cross-flag semantics after argparse has parsed the command line."""
+    if getattr(args, "command", None) == "analyze-units" and getattr(args, "changed", False):
+        args.stale = True
+        args.missing = True
+
+
 def _unit_dispatch(args):  # pragma: no cover - argparse routes to subfuncs
     return args.func(args)
 
@@ -231,6 +238,7 @@ def _orchestrations_dispatch(args):  # pragma: no cover
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    _normalise_args(args)
     try:
         return args.func(args)
     except GroundrailError as exc:
