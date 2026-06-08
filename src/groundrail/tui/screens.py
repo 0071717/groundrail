@@ -15,9 +15,13 @@ _TITLES = {
     "dashboard": "Dashboard",
     "units": "Units",
     "unit": "Unit detail",
+    "review": "Review queue",
+    "knowledge": "Knowledge facts",
     "sessions": "Sessions",
     "session": "Session detail",
     "gaps": "Capability gaps",
+    "map": "Layer map",
+    "eval": "Evaluation",
 }
 
 
@@ -29,10 +33,18 @@ def default_ui() -> dict[str, Any]:
 def row_count(builder: ViewModelBuilder, screen: str) -> int:
     if screen == "units":
         return len(builder.units_rows())
+    if screen == "review":
+        return len(builder.review_rows())
+    if screen == "knowledge":
+        return len(builder.knowledge_rows())
     if screen == "sessions":
         return len(builder.sessions_rows())
     if screen == "gaps":
         return len(builder.gaps_rows())
+    if screen == "map":
+        return len(builder.layer_map().get("layers", []))
+    if screen == "eval":
+        return len(builder.eval_report().get("checks", []))
     return 0
 
 
@@ -44,12 +56,20 @@ def body_lines(builder: ViewModelBuilder, ui: dict[str, Any], width: int) -> lis
         return render.render_units(builder.units_rows(), ui["selection"], width)
     if screen == "unit":
         return render.render_unit_detail(builder.unit_detail(ui["selected_unit"]), width)
+    if screen == "review":
+        return render.render_review(builder.review_rows(), ui["selection"], width)
+    if screen == "knowledge":
+        return render.render_knowledge(builder.knowledge_rows(), ui["selection"], width)
     if screen == "sessions":
         return render.render_sessions(builder.sessions_rows(), ui["selection"], width)
     if screen == "session":
         return render.render_session_detail(builder.session_detail(ui["selected_session"]), width)
     if screen == "gaps":
         return render.render_gaps(builder.gaps_rows(), ui["selection"], width)
+    if screen == "map":
+        return render.render_layer_map(builder.layer_map(), ui["selection"], width)
+    if screen == "eval":
+        return render.render_eval(builder.eval_report(), ui["selection"], width)
     return ["unknown screen"]
 
 
