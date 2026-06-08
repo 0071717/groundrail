@@ -17,6 +17,7 @@ from ..core.store import ArtifactStore
 from ..core.workspace import Workspace
 from ..analyzer.store import AnalysisStore
 from ..indexer.unit_index import UnitStore
+from ..knowledge import KnowledgeStore
 
 _BLOCK_RE = re.compile(
     rf"<{vocab.CITATION_BLOCK_TAG}>\s*(\{{.*?\}})\s*</{vocab.CITATION_BLOCK_TAG}>",
@@ -31,11 +32,13 @@ class AnswerAuditor:
         self.store: ArtifactStore = workspace.store
         self.units = UnitStore(self.store)
         self.analyses = AnalysisStore(self.store)
+        self.knowledge = KnowledgeStore(self.store)
         self._build_universe()
 
     def _build_universe(self) -> None:
         self.unit_ids: set[str] = set()
         self.evidence_ids: set[str] = set()
+        self.fact_ids: set[str] = {f["fact_id"] for f in self.knowledge.all()}
         self.analysis_state: dict[str, str] = {}
         self.analysis_stale: dict[str, str] = {}
 
@@ -68,8 +71,25 @@ class AnswerAuditor:
                              "message": f"citation block is not valid JSON: {exc}"})
             return self._result(findings, 0)
 
+        if not isinstance(block, dict):
+            findings.append({"severity": "error", "code": "malformed_citation_json",
+                             "message": "citation block must be a JSON object"})
+            return self._result(findings, 0)
+
         claims = block.get("claims", [])
+        if not isinstance(claims, list):
+            findings.append({"severity": "error", "code": "claims_not_list",
+                             "message": "citation block field 'claims' must be a list"})
+            return self._result(findings, 0)
+        if not claims:
+            findings.append({"severity": "error", "code": "no_cited_claims",
+                             "message": "citation block contains no claims"})
+
         for claim in claims:
+            if not isinstance(claim, dict):
+                findings.append({"severity": "error", "code": "bad_claim_shape",
+                                 "message": "each citation claim must be an object"})
+                continue
             self._audit_claim(claim, findings)
         return self._result(findings, len(claims))
 
@@ -85,6 +105,17 @@ class AnswerAuditor:
         cited_evidence = claim.get("evidence_ids", []) or []
         cited_facts = claim.get("fact_ids", []) or []
 
+        for field, value in (
+            ("analysis_ids", cited_analyses),
+            ("unit_ids", cited_units),
+            ("evidence_ids", cited_evidence),
+            ("fact_ids", cited_facts),
+        ):
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                findings.append({"severity": "error", "code": "bad_citation_array",
+                                 "message": f"claim {cid}: {field} must be a list of strings"})
+                return
+
         for uid in cited_units:
             if uid not in self.unit_ids:
                 findings.append({"severity": "error", "code": "unknown_unit_id",
@@ -93,6 +124,10 @@ class AnswerAuditor:
             if eid not in self.evidence_ids:
                 findings.append({"severity": "error", "code": "unknown_evidence_id",
                                  "message": f"claim {cid}: cites unknown evidence {eid}"})
+        for fid in cited_facts:
+            if fid not in self.fact_ids:
+                findings.append({"severity": "error", "code": "unknown_fact_id",
+                                 "message": f"claim {cid}: cites unknown fact {fid}"})
         for aid in cited_analyses:
             if aid not in self.analysis_state:
                 findings.append({"severity": "error", "code": "unknown_analysis_id",
@@ -114,6 +149,10 @@ class AnswerAuditor:
             if not has_hard and not cited_analyses:
                 findings.append({"severity": "error", "code": "unsupported_claim",
                                  "message": f"claim {cid}: marked 'supported' but cites nothing"})
+        elif support in ("inferred", "not_confirmed"):
+            if not (cited_analyses or cited_units or cited_evidence or cited_facts):
+                findings.append({"severity": "error", "code": "uncited_claim",
+                                 "message": f"claim {cid}: support={support!r} but cites no Groundrail ids"})
 
     def _result(self, findings: list[dict[str, Any]], claim_count: int) -> dict[str, Any]:
         has_error = any(f["severity"] == "error" for f in findings)
