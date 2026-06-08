@@ -41,7 +41,6 @@ def _loop(stdscr, workspace: Workspace):  # pragma: no cover
         if key in (ord("q"), ord("Q")):
             break
         if not _handle_key(key, ui, builder):
-            # 'r' refresh: rebuild the data layer
             builder = ViewModelBuilder(workspace)
 
 
@@ -49,9 +48,11 @@ def _handle_key(key, ui, builder) -> bool:  # pragma: no cover
     import curses
 
     screen = ui["screen"]
-    if key in (ord("1"), ord("2"), ord("3"), ord("4")):
-        ui.update(screen=SCREENS[key - ord("1")], selection=0, scroll=0)
-        return True
+    if ord("1") <= key <= ord("9"):
+        idx = key - ord("1")
+        if idx < len(SCREENS):
+            ui.update(screen=SCREENS[idx], selection=0, scroll=0)
+            return True
     if key == ord("\t"):
         idx = (SCREENS.index(screen) if screen in SCREENS else 0)
         ui.update(screen=SCREENS[(idx + 1) % len(SCREENS)], selection=0, scroll=0)
@@ -64,7 +65,7 @@ def _handle_key(key, ui, builder) -> bool:  # pragma: no cover
                   scroll=0)
         return True
 
-    is_detail = screen in ("unit", "session", "dashboard")
+    is_detail = screen in ("unit", "session", "dashboard", "map", "eval")
     if key in (curses.KEY_DOWN, ord("j")):
         if is_detail:
             ui["scroll"] += 1
