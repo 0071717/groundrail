@@ -47,7 +47,10 @@ def extract_json(raw: str) -> dict[str, Any]:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                return json.loads(raw[start : i + 1])
+                obj = json.loads(raw[start : i + 1])
+                if not isinstance(obj, dict):
+                    raise ValueError("top-level JSON value must be an object")
+                return obj
     raise ValueError("unbalanced JSON object in AI output")
 
 
@@ -90,11 +93,14 @@ def parse_and_validate(
     if not isinstance(payload.get("summary"), str) or not payload["summary"].strip():
         report.error("AI analysis missing required 'summary'")
 
-    ai_confidence = payload.get("ai_confidence", 0.6)
-    if not isinstance(ai_confidence, (int, float)) or not 0.0 <= float(ai_confidence) <= 1.0:
-        report.error(f"ai_confidence must be a number in [0,1], got {ai_confidence!r}")
-        ai_confidence = 0.5
-    ai_confidence = float(ai_confidence)
+    ai_confidence = _safe_float(
+        payload.get("ai_confidence", 0.6),
+        default=0.5,
+        label="ai_confidence",
+        report=report,
+        minimum=0.0,
+        maximum=1.0,
+    )
 
     span = unit["span"]
     _check_evidence_lines(payload, span, report)
@@ -102,6 +108,9 @@ def parse_and_validate(
 
     complexity = unit.get("complexity", {})
     uncertainties = payload.get("uncertainties", []) or []
+    if not isinstance(uncertainties, list):
+        report.error("uncertainties must be a list")
+        uncertainties = []
     confidence = compute_confidence(
         ai_confidence=ai_confidence,
         complexity_state=complexity.get("state", vocab.COMPLEXITY_MODERATE),
@@ -123,18 +132,25 @@ def parse_and_validate(
         uncertainties=uncertainties,
         model=model,
         prompt_hash=prompt_hash,
+        report=report,
     )
     return analysis, report
 
 
 def _check_evidence_lines(payload: dict[str, Any], span: dict[str, int], report: ValidationReport) -> None:
     lo, hi = span["start_line"], span["end_line"]
-    for field in _CLAIM_LIST_FIELDS + ("uncertainties",):
-        for item in payload.get(field, []) or []:
+    for field in _CLAIM_LIST_FIELDS + ("uncertainties", "ai_notes"):
+        value = payload.get(field, []) or []
+        if not isinstance(value, list):
+            report.error(f"{field} must be a list")
+            continue
+        for item in value:
             if not isinstance(item, dict):
                 continue
             for line in item.get("evidence_lines", []) or []:
-                if isinstance(line, int) and not (lo <= line <= hi):
+                if not isinstance(line, int):
+                    report.error(f"{field}: evidence line {line!r} is not an integer")
+                elif not (lo <= line <= hi):
                     report.error(
                         f"{field}: evidence line {line} outside unit span {lo}-{hi}"
                     )
@@ -146,6 +162,7 @@ def _normalise_notes(notes: Any, span: dict[str, int], report: ValidationReport)
         return result
     for idx, note in enumerate(notes):
         if not isinstance(note, dict):
+            report.error(f"ai_note[{idx}] must be an object")
             continue
         note_type = note.get("type")
         if note_type not in vocab.NOTE_TYPES:
@@ -155,10 +172,17 @@ def _normalise_notes(notes: Any, span: dict[str, int], report: ValidationReport)
             {
                 "note_id": f"note.{idx}",
                 "type": note_type,
-                "severity": note.get("severity", "low"),
-                "importance": note.get("importance", "low"),
-                "confidence": float(note.get("confidence", 0.5)),
-                "text": note.get("text", ""),
+                "severity": str(note.get("severity", "low")),
+                "importance": str(note.get("importance", "low")),
+                "confidence": _safe_float(
+                    note.get("confidence", 0.5),
+                    default=0.5,
+                    label=f"ai_note[{idx}].confidence",
+                    report=report,
+                    minimum=0.0,
+                    maximum=1.0,
+                ),
+                "text": str(note.get("text", "")),
                 "evidence_lines": [
                     l for l in note.get("evidence_lines", []) or []
                     if isinstance(l, int) and span["start_line"] <= l <= span["end_line"]
@@ -170,21 +194,54 @@ def _normalise_notes(notes: Any, span: dict[str, int], report: ValidationReport)
     return result
 
 
-def _claim_list(payload: dict[str, Any], field: str) -> list[dict[str, Any]]:
+def _claim_list(payload: dict[str, Any], field: str, report: ValidationReport) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for i, item in enumerate(payload.get(field, []) or []):
+    value = payload.get(field, []) or []
+    if not isinstance(value, list):
+        return out
+    for i, item in enumerate(value):
         if isinstance(item, dict) and item.get("text"):
             out.append(
                 {
                     "claim_id": f"claim.{field}.{i:03d}",
-                    "text": item["text"],
+                    "text": str(item["text"]),
                     "support": "inferred_from_span",
-                    "confidence": float(item.get("confidence", 0.6)),
+                    "confidence": _safe_float(
+                        item.get("confidence", 0.6),
+                        default=0.6,
+                        label=f"{field}[{i}].confidence",
+                        report=report,
+                        minimum=0.0,
+                        maximum=1.0,
+                    ),
                     "evidence_lines": [l for l in item.get("evidence_lines", []) or [] if isinstance(l, int)],
                     "review_status": vocab.REVIEW_UNREVIEWED,
                 }
             )
     return out
+
+
+def _safe_float(
+    value: Any,
+    *,
+    default: float,
+    label: str,
+    report: ValidationReport,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        report.error(f"{label} must be a number, got {value!r}")
+        return default
+    if minimum is not None and number < minimum:
+        report.error(f"{label} must be >= {minimum}, got {number!r}")
+        return default
+    if maximum is not None and number > maximum:
+        report.error(f"{label} must be <= {maximum}, got {number!r}")
+        return default
+    return number
 
 
 def _assemble(
@@ -198,6 +255,7 @@ def _assemble(
     uncertainties: list[Any],
     model: str,
     prompt_hash: str,
+    report: ValidationReport,
 ) -> dict[str, Any]:
     uid = unit["unit_id"]
     return {
@@ -210,18 +268,18 @@ def _assemble(
         "review_status": vocab.REVIEW_UNREVIEWED,
         "review": None,
         "summary": payload.get("summary", ""),
-        "intent": _claim_list(payload, "intent"),
-        "inputs": _claim_list(payload, "inputs"),
-        "outputs": _claim_list(payload, "outputs"),
-        "side_effects": _claim_list(payload, "side_effects"),
-        "state_access": _claim_list(payload, "state_access"),
-        "calls": _claim_list(payload, "calls"),
-        "errors": _claim_list(payload, "errors"),
-        "behavioral_notes": _claim_list(payload, "behavioral_notes"),
+        "intent": _claim_list(payload, "intent", report),
+        "inputs": _claim_list(payload, "inputs", report),
+        "outputs": _claim_list(payload, "outputs", report),
+        "side_effects": _claim_list(payload, "side_effects", report),
+        "state_access": _claim_list(payload, "state_access", report),
+        "calls": _claim_list(payload, "calls", report),
+        "errors": _claim_list(payload, "errors", report),
+        "behavioral_notes": _claim_list(payload, "behavioral_notes", report),
         "uncertainties": [
             {
-                "text": u.get("text", ""),
-                "reason": u.get("reason", ""),
+                "text": str(u.get("text", "")),
+                "reason": str(u.get("reason", "")),
                 "evidence_lines": [l for l in u.get("evidence_lines", []) or [] if isinstance(l, int)],
             }
             for u in uncertainties
