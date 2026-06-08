@@ -16,7 +16,8 @@ from ..core.store import ArtifactStore
 from ..core.workspace import Workspace
 from ..analyzer.store import AnalysisStore
 from ..indexer.unit_index import UnitStore
-from .retrieval import RetrievalIndex, RetrievalIndexBuilder
+from ..knowledge import KnowledgeStore
+from .retrieval import RetrievalIndex, RetrievalIndexBuilder, tokenize
 from .session import SessionStore
 
 DEFAULT_TOKEN_BUDGET = 6000
@@ -32,6 +33,7 @@ class ContextPackBuilder:
         self.store: ArtifactStore = workspace.store
         self.units = UnitStore(self.store)
         self.analyses = AnalysisStore(self.store)
+        self.knowledge = KnowledgeStore(self.store)
         self.sessions = SessionStore(self.store)
 
     def build(
@@ -57,9 +59,10 @@ class ContextPackBuilder:
         selected_units: list[dict[str, Any]] = []
         selected_analyses: list[dict[str, Any]] = []
         selected_notes: list[dict[str, Any]] = []
+        selected_facts = self._matching_facts(request)
         stale_items: list[str] = []
         explain: list[dict[str, Any]] = []
-        used = 0
+        used = sum(estimate_tokens(f.get("text", "")) for f in selected_facts)
         seen_units: set[str] = set()
 
         for row in results:
@@ -105,7 +108,7 @@ class ContextPackBuilder:
             },
             "token_budget": budget,
             "tokens_used": used,
-            "selected_facts": [],
+            "selected_facts": selected_facts,
             "selected_unit_analyses": selected_analyses,
             "selected_ai_notes": selected_notes,
             "selected_flows": [],
@@ -174,6 +177,20 @@ class ContextPackBuilder:
             "uncertainties": [u["text"] for u in analysis.get("uncertainties", [])],
         }
 
+    def _matching_facts(self, request: str) -> list[dict[str, Any]]:
+        facts = self.knowledge.all()
+        if not facts:
+            return []
+        request_tokens = set(tokenize(request))
+        ranked: list[tuple[int, dict[str, Any]]] = []
+        for fact in facts:
+            text_tokens = set(tokenize(fact.get("text", "")))
+            score = len(request_tokens & text_tokens)
+            if score or not request_tokens:
+                ranked.append((score, fact))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [fact for _, fact in ranked[:10]]
+
     def _notable_notes(self, unit: dict[str, Any], analysis: dict[str, Any]) -> list[dict[str, Any]]:
         out = []
         for note in analysis.get("ai_notes", []):
@@ -209,6 +226,15 @@ class ContextPackBuilder:
         if pack["freshness"]["stale_items"]:
             lines.append(f"**Stale (excluded from support):** {', '.join(pack['freshness']['stale_items'])}")
         lines.append("")
+
+        if pack["selected_facts"]:
+            lines.append("## Developer-confirmed promoted facts")
+            for fact in pack["selected_facts"]:
+                lines.append(
+                    f"- [{fact['state']}/{fact['confidence']}/{fact['review_status']}] "
+                    f"{fact['text']} (`{fact['fact_id']}` from `{fact['source_item_id']}`)"
+                )
+            lines.append("")
 
         confirmed = [a for a in pack["selected_unit_analyses"] if a["review_status"] == "dev_confirmed"]
         inferred = [a for a in pack["selected_unit_analyses"] if a["review_status"] != "dev_confirmed"]
