@@ -83,4 +83,40 @@ Start here:
 
 ## Current status
 
-This repository is currently the clean planning/specification home for Groundrail. Implementation should follow the architecture and roadmap documents before code is added.
+Implementation has begun, following the **revised roadmap** in
+[`docs/09_INDEPENDENT_ARCHITECTURE_REVIEW.md`](docs/09_INDEPENDENT_ARCHITECTURE_REVIEW.md).
+The codebase is organised as three components rather than ten layers:
+
+- **`indexer`** — deterministic source snapshot + Python AST unit index (no AI).
+- **`analyzer`** — AI unit analysis with provenance, uncertainty, secret-scanning,
+  and stale binding; defaults to `state: inferred` and rejects any `verified` claim.
+- **`router`** — retrieval, token-budgeted context packs, Kiro runner, and answer audit.
+
+`core` holds the shared trust contract (vocabulary, artifact envelope, evidence,
+storage, strict validation). Phases 1–4 of the revised roadmap — through the first
+useful product (`ask` with cited context packs) — are implemented and tested.
+
+### Quickstart
+
+```bash
+pip install -e .                       # or: export PYTHONPATH=src
+groundrail init --repo myapp
+groundrail snapshot                    # record files, hashes, git state
+groundrail index units                 # deterministic Python unit index
+groundrail unit list
+
+export GROUNDRAIL_AI_CMD='kiro-cli'     # any command that reads a prompt on stdin
+groundrail analyze-units --missing      # AI analyses, stored as inferred + cited
+
+export GROUNDRAIL_KIRO_CMD='kiro-cli --prompt-file {context_pack}'
+groundrail ask "how does order total work?"   # context pack -> Kiro -> citation audit
+```
+
+Run the test suite with `pytest` (50 tests covering the trust contract,
+extraction, strict validation, prompt-injection handling, and the audit loop).
+
+### Not yet implemented (deferred per the revised roadmap)
+
+TypeScript/React extraction (Phase 6), flow/impact composition (Phase 7),
+the full TUI, and the conductor/child-agent orchestration. Promotion is folded
+into review rather than kept as a separate layer.
