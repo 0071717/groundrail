@@ -79,6 +79,7 @@ Start here:
 - [`docs/06_ROADMAP.md`](docs/06_ROADMAP.md)
 - [`docs/07_RISKS_LIMITATIONS_CONCERNS.md`](docs/07_RISKS_LIMITATIONS_CONCERNS.md)
 - [`docs/08_IMPLEMENTATION_HANDOFF.md`](docs/08_IMPLEMENTATION_HANDOFF.md)
+- [`docs/09_INDEPENDENT_ARCHITECTURE_REVIEW.md`](docs/09_INDEPENDENT_ARCHITECTURE_REVIEW.md) — adversarial independent review of the plan
 
 ## Current status
 
