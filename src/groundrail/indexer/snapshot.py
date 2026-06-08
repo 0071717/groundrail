@@ -19,8 +19,10 @@ SNAPSHOT_PATH = "source/snapshot.json"
 FILE_INDEX_PATH = "index/file-index.json"
 RUN_MANIFEST_PATH = "audit/run-manifest.json"
 
-_SOURCE_EXTS = {".py", ".ts", ".tsx", ".js", ".jsx"}
+_SOURCE_EXTS = {".py", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml", ".yml"}
+_CODE_EXTS = {".py", ".ts", ".tsx", ".js", ".jsx"}
 _GENERATED_HINTS = ("generated", ".gen.", "_pb2", ".min.")
+_OPENSEARCH_HINTS = ("opensearch", "open_search", "elasticsearch", "mapping", "mappings", "index-template", "index_template", "template")
 
 
 def _language_for(path: Path) -> str:
@@ -31,16 +33,27 @@ def _language_for(path: Path) -> str:
         return "typescript"
     if ext in (".js", ".jsx"):
         return "javascript"
+    if ext == ".json":
+        return "json"
+    if ext in (".yaml", ".yml"):
+        return "yaml"
     return "other"
 
 
 def _classify(path: Path) -> str:
     name = path.name.lower()
+    rel = path.as_posix().lower()
     if any(hint in name for hint in _GENERATED_HINTS):
         return "generated"
     if name.startswith("test_") or name.endswith(("_test.py", ".test.ts", ".test.tsx")):
         return "test"
-    if path.suffix.lower() in _SOURCE_EXTS:
+    if path.suffix.lower() in (".json", ".yaml", ".yml"):
+        if any(hint in rel for hint in _OPENSEARCH_HINTS):
+            return "opensearch_schema"
+        if name in ("package.json", "package-lock.json", "tsconfig.json"):
+            return "config"
+        return "config"
+    if path.suffix.lower() in _CODE_EXTS:
         return "source"
     return "other"
 
@@ -142,17 +155,18 @@ class SourceSnapshotter:
                 continue
             text = data.decode("utf-8", errors="replace")
             rel_str = rel.as_posix()
+            classification = _classify(rel)
             records.append(
                 {
                     "file_id": ids.file_id(repo, rel_str),
                     "repo": repo,
                     "path": rel_str,
                     "language": _language_for(path),
-                    "classification": _classify(path),
+                    "classification": classification,
                     "line_count": text.count("\n") + 1,
                     "size_bytes": len(data),
                     "sha256": hashing.sha256_bytes(data),
-                    "generated": _classify(path) == "generated",
+                    "generated": classification == "generated",
                     "ignored": False,
                 }
             )
